@@ -1,3 +1,13 @@
+# Local DB / backups 20250823 add
+local.db
+*.sqlite
+backup_*.sql
+backup_before_reinit_*.sql
+
+# OS / 下載附帶  backups 20250823 add
+*.Zone.Identifier
+
+
 # Python
 __pycache__/
 *.py[cod]
