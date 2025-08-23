@@ -1,0 +1,27 @@
+from unittest.mock import patch
+import pytest
+from src import schemas
+
+@pytest.fixture
+def mock_crud():
+    with patch("src.main.crud") as mock_crud:
+        yield mock_crud
+
+def test_create_budget(client, mock_crud):
+    # 設置模擬返回值
+    mock_budget = schemas.BudgetRead(id=1, budget_code="API-001", name="API Test Budget")
+    mock_crud.create_budget.return_value = mock_budget
+    
+    # 發送請求
+    budget_data = {
+        "budget_code": "API-001",
+        "name": "API Test Budget"
+    }
+    response = client.post("/budgets/", json=budget_data)
+    
+    # 驗證結果
+    assert response.status_code == 200
+    data = response.json()
+    assert data["budget_code"] == "API-001"
+    assert data["name"] == "API Test Budget"
+    assert data["id"] == 1

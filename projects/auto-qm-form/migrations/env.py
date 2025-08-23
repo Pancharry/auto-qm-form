@@ -16,11 +16,47 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# 1.1 20250818 在 migrations/env.py 頂部 sys.path 完成後加入：
+try:
+    from src.config import get_settings  # Pydantic v2 settings
+except Exception:
+    get_settings = None  # 若失敗則 fallback 原邏輯
+
+def get_db_url() -> str:
+    # 1. -x db_url=...
+    x_args = context.get_x_argument(as_dictionary=True)
+    if "db_url" in x_args and x_args["db_url"]:
+        return x_args["db_url"]
+
+    # 2. TEST_DATABASE_URL (若存在且 APP_ENV=test)
+    if os.getenv("TEST_DATABASE_URL"):
+        return os.getenv("TEST_DATABASE_URL")
+
+    # 3. DATABASE_URL
+    if os.getenv("DATABASE_URL"):
+        return os.getenv("DATABASE_URL")
+
+    # 4. config settings（若有）
+    if get_settings:
+        try:
+            s = get_settings()
+            return s.effective_database_url
+        except Exception:
+            pass
+
+    # 5. alembic.ini sqlalchemy.url
+    ini_url = config.get_main_option("sqlalchemy.url")
+    if ini_url:
+        return ini_url
+
+    raise RuntimeError("無法解析資料庫 URL，請設定 -x db_url= 或環境變數 DATABASE_URL")
+
+
 # --------------------------------------------------
 # 2. 匯入 Base 以及所有 models
 # --------------------------------------------------
 from src.db import Base  # Base 含 naming_convention
-import src.models  # noqa: F401  需確保此路徑下的模型定義已被 import
+from src import models  # noqa: F401  需確保此路徑下的模型定義已被 import
 
 # --------------------------------------------------
 # 3. Alembic 基本 config 與 logging

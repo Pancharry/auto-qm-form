@@ -178,6 +178,7 @@ def reset_engine_for_test(url: str):
 # -----------------------------------------
 # （可選）快速建立全部表（不建議在正式或與 Alembic 併用）
 # -----------------------------------------
+"""
 def create_all(url: Optional[str] = None):
     engine = get_engine(url)
     Base.metadata.create_all(engine)
@@ -186,7 +187,7 @@ def create_all(url: Optional[str] = None):
 def drop_all(url: Optional[str] = None):
     engine = get_engine(url)
     Base.metadata.drop_all(engine)
-
+"""
 
 # -----------------------------------------
 # 入口測試（手動執行）

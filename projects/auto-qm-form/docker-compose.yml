@@ -12,7 +12,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appuser -d auto_qm"]
+      test: ["CMD-SHELL", "pg_isready -U appuser -d auto_qm || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10

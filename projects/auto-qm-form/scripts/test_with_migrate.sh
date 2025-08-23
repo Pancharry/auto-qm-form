@@ -10,4 +10,4 @@ echo "[Alembic upgrade]"
 alembic -x db_url="$TEST_DATABASE_URL" upgrade head
 
 echo "[Run pytest]"
-pytest -q
+PYTHONPATH=. pytest -q
