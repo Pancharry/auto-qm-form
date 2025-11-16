@@ -1,6 +1,7 @@
+
 [project]
 name = "auto-qm-form"
-version = "0.1.0"
+version = "0.2.0"
 description = "Auto QM Form"
 requires-python = ">=3.11"
 dependencies = [
@@ -8,7 +9,13 @@ dependencies = [
   "psycopg2-binary>=2.9",
   "alembic>=1.13",
   "python-dotenv",
+  "python-multipart==0.0.9", 
+  "pandas==2.2.2",
+  "openpyxl==3.1.2",
+  "pdfplumber==0.10.3"
 ]
+
+#  add last 4 items for M1, csv, excel,  and pdf
 
 [project.optional-dependencies]
 dev = [
@@ -30,3 +37,5 @@ addopts = "-ra"
 [tool.coverage.run]
 branch = true
 source = ["src"]
+
+

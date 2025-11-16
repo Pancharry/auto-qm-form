@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...services import ingestion
 
-router = APIRouter(prefix="/specs", tags=["specs"])
+router = APIRouter()
 
 @router.post("/import")
 async def import_specs(

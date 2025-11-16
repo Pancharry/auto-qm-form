@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...services import form_generation
 
-router = APIRouter(prefix="/form", tags=["form"])
+router = APIRouter()
 
 @router.get("/identify/{budget_id}")
 def identify(budget_id: str, db: Session = Depends(get_db)):

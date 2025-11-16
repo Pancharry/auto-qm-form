@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...services import reference_data
 
-router = APIRouter(prefix="/reference", tags=["reference"])
+router = APIRouter() # 可在 main.py 掛載時指定 prefix="/reference", tags=["reference"]
 
 @router.post("/upload")
 async def upload_reference(

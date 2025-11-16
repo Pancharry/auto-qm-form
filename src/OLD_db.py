@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Generator, Optional
+from typing import Generator, Optional, Callable
 
 from sqlalchemy import create_engine, MetaData, text
 from sqlalchemy.orm import (
@@ -11,11 +11,12 @@ from sqlalchemy.orm import (
     Session,
 )
 
-# 可選：設定模組（若失敗不阻擋）
+# 你自己的設定模組（若無可移除）
 try:
-    from src.config import get_settings  # type: ignore
+    from src.config import get_settings  # 假設存在
 except Exception:  # noqa
     get_settings = None  # type: ignore
+
 
 # -----------------------------------------
 # 命名慣例：讓 Alembic 在 rename / diff 時更穩定
@@ -34,18 +35,19 @@ class Base(DeclarativeBase):
 
 
 # -----------------------------------------
-# 解析資料庫 URL
+# 取得資料庫 URL（統一邏輯）
 # -----------------------------------------
 def _resolve_database_url(
     explicit: Optional[str] = None,
     prefer_test: bool = True,
 ) -> str:
     """
-    優先序：
-    1. explicit
+    解析資料庫連線字串優先順序：
+    1. explicit (呼叫者直接傳入)
     2. TEST_DATABASE_URL（若 prefer_test=True）
     3. DATABASE_URL
-    4. 設定物件 get_settings()
+    4. 設定物件 (get_settings) 的 DATABASE_URL
+    5. 失敗則拋例外
     """
     if explicit:
         return explicit
@@ -73,12 +75,12 @@ def _resolve_database_url(
 
 
 # -----------------------------------------
-# Engine / Session 管理（惰性 + 可重置）
+# Engine / Session 管理（惰性建立 + 可重置）
 # -----------------------------------------
 _ENGINE = None
 _SessionFactory: Optional[sessionmaker] = None
 
-
+# 20250823 增加 pool_size, max_overflow 參數
 def get_engine(
     url: Optional[str] = None,
     *,
@@ -88,38 +90,43 @@ def get_engine(
     pool_size: int | None = None,
     max_overflow: int | None = None,
 ):
-    """
-    惰性建立 Engine，若傳入新的 url 與既有不同會重建。
-    pool_size / max_overflow 僅在非 SQLite 時適用。
-    """
     global _ENGINE
     if _ENGINE is not None and url is not None:
+        # 若傳入的 url 與現有 engine 不同 → 重新建立
         current_url = str(_ENGINE.url)
         if current_url != url:
             _ENGINE.dispose()
             _ENGINE = None
 
-    if _ENGINE is None:
+#    if _ENGINE is None:
         resolved = _resolve_database_url(url)
-        connect_args: dict = {}
-        if resolved.startswith("sqlite"):
-            # 多執行緒 FastAPI + SQLite（測試/開發）
-            connect_args["check_same_thread"] = False
-
-        create_kwargs: dict = {
-            "echo": echo,
-            "future": future,
-            "pool_pre_ping": pool_pre_ping,
-        }
-        if not resolved.startswith("sqlite"):
-            if pool_size is not None:
-                create_kwargs["pool_size"] = pool_size
-            if max_overflow is not None:
-                create_kwargs["max_overflow"] = max_overflow
-
-        _ENGINE = create_engine(resolved, connect_args=connect_args, **create_kwargs)
-    return _ENGINE
-
+        _ENGINE = create_engine(
+            resolved,
+            echo=echo,
+            future=future,
+            pool_pre_ping=pool_pre_ping,
+        )
+#    return _ENGINE
+#    20250823 增加下列邏輯
+        if _ENGINE is None:
+            resolved = _resolve_database_url(url)
+            connect_args = {}
+            if resolved.startswith("sqlite"):
+                # FastAPI 多執行緒 + SQLite 需關閉同執行緒限制
+                connect_args["check_same_thread"] = False
+            create_kwargs = {
+                "echo": echo,
+                "future": future,
+                "pool_pre_ping": pool_pre_ping,
+            }
+            # SQLite 不支援 pool_size / max_overflow
+            if not resolved.startswith("sqlite"):
+                if pool_size is not None:
+                    create_kwargs["pool_size"] = pool_size
+                if max_overflow is not None:
+                    create_kwargs["max_overflow"] = max_overflow
+            _ENGINE = create_engine(resolved, connect_args=connect_args, **create_kwargs)
+         return _ENGINE
 
 def get_sessionmaker(
     url: Optional[str] = None,
@@ -127,12 +134,9 @@ def get_sessionmaker(
     expire_on_commit: bool = False,
     autoflush: bool = True,
 ) -> sessionmaker:
-    """
-    回傳（或建立）全域 sessionmaker。
-    若有新 URL 需重建，會比較 bind 是否同一個 engine。
-    """
     global _SessionFactory
     if _SessionFactory is not None and url is not None:
+        # 若需要強制重建
         engine = get_engine(url)
         if _SessionFactory.kw.get("bind") is not engine:  # type: ignore
             _SessionFactory = None
@@ -149,14 +153,22 @@ def get_sessionmaker(
     return _SessionFactory
 
 
-# 預設供其他模組匯入
+# 預設的 SessionLocal（供現有程式碼沿用）
 SessionLocal = get_sessionmaker()
 
 
 # -----------------------------------------
-# FastAPI 依賴
+# FastAPI 或一般 dependency 用法
 # -----------------------------------------
 def get_db() -> Generator[Session, None, None]:
+    """
+    with 用法：
+    with SessionLocal() as db:
+        ...
+    或 FastAPI:
+    def endpoint(db: Session = Depends(get_db)):
+        ...
+    """
     db = SessionLocal()
     try:
         yield db
@@ -165,13 +177,13 @@ def get_db() -> Generator[Session, None, None]:
 
 
 # -----------------------------------------
-# 測試專用：重置
+# 測試專用：重置 engine / session（例如在 pytest fixture 裡）
 # -----------------------------------------
 def reset_engine_for_test(url: str):
     """
-    測試 fixture 可呼叫：
+    在測試初始化時呼叫：
         reset_engine_for_test(TEST_DATABASE_URL)
-    確保每個測試 session 獨立（若需要）。
+    之後 import 的 SessionLocal 會指向新的 sessionmaker。
     """
     global _ENGINE, _SessionFactory, SessionLocal
     if _ENGINE is not None:
@@ -185,7 +197,35 @@ def reset_engine_for_test(url: str):
 
 
 # -----------------------------------------
-# 啟動檢查 / 關閉釋放
+# （可選）快速建立全部表（不建議在正式或與 Alembic 併用）
+# -----------------------------------------
+"""
+def create_all(url: Optional[str] = None):
+    engine = get_engine(url)
+    Base.metadata.create_all(engine)
+
+
+def drop_all(url: Optional[str] = None):
+    engine = get_engine(url)
+    Base.metadata.drop_all(engine)
+"""
+
+# -----------------------------------------
+# 入口測試（手動執行）
+# -----------------------------------------
+if __name__ == "__main__":
+    # 單次連線測試
+#    engine = get_engine()
+#    with engine.connect() as conn:
+#        print("資料庫連線成功：", conn.execute("SELECT 1").scalar())
+
+# 20250823 修改為 text() 方式
+       engine = get_engine()
+        with engine.connect() as conn:
+            print("資料庫連線成功：", conn.execute(text("SELECT 1")).scalar())
+
+# -----------------------------------------
+# 啟動檢查 / 關閉釋放（供 main.py 使用）
 # -----------------------------------------
 def test_connection() -> None:
     engine = get_engine()
@@ -197,27 +237,5 @@ def dispose_engine_on_shutdown():
     if _ENGINE is not None:
         try:
             _ENGINE.dispose()
-        finally:
+       finally:
             _ENGINE = None
-
-
-# -----------------------------------------
-# 可選：create_all / drop_all（與 Alembic 併用時建議不啟動）
-# -----------------------------------------
-"""
-def create_all(url: Optional[str] = None):
-    engine = get_engine(url)
-    Base.metadata.create_all(engine)
-
-def drop_all(url: Optional[str] = None):
-    engine = get_engine(url)
-    Base.metadata.drop_all(engine)
-"""
-
-# -----------------------------------------
-# 直接執行檔案時：連線測試
-# -----------------------------------------
-if __name__ == "__main__":
-    engine = get_engine()
-    with engine.connect() as conn:
-        print("資料庫連線成功：", conn.execute(text("SELECT 1")).scalar())
